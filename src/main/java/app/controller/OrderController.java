@@ -5,9 +5,15 @@ import app.dto.OrderResponse;
 import app.entity.Account;
 import app.entity.Instrument;
 import app.entity.Order;
+import app.entity.Trade;
 import app.repository.AccountRepository;
 import app.repository.InstrumentRepository;
 import app.repository.OrderRepository;
+import app.repository.TradeRepository;
+
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,8 +32,11 @@ public class OrderController {
     @Autowired
     private AccountRepository accountRepository;
 
+    @Autowired
+    private TradeRepository tradeRepository;
+
     // Создание заявки
-    @PostMapping
+   @PostMapping
     public ResponseEntity<?> createOrder(@RequestBody OrderRequest request) {
         try {
             // 1. Проверяем инструмент
@@ -71,15 +80,7 @@ public class OrderController {
             }
 
             // 7. Проверяем, что цена соответствует минимальному шагу
-            double remainder = request.getPrice() % instrument.getMinStep();
-
-            // Логирование для отладки
-            System.out.println("=== Проверка минимального шага ===");
-            System.out.println("Цена: " + request.getPrice());
-            System.out.println("Минимальный шаг: " + instrument.getMinStep());
-            System.out.println("Остаток от деления: " + remainder);
-            System.out.println("Остаток > 0.0001? " + (remainder > 0.01));
-
+            double remainder = Math.round(request.getPrice() % instrument.getMinStep());
             if (remainder > 0.01) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                         .body("Цена должна быть кратна минимальному шагу (" + instrument.getMinStep() + ")");
@@ -90,34 +91,45 @@ public class OrderController {
                 double totalCost = request.getPrice() * request.getQuantity();
                 if (account.getBalance() < totalCost) {
                     return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                            .body("Недостаточно средств. Необходимо: " + totalCost +
-                                    ", доступно: " + account.getBalance());
+                            .body("Недостаточно средств. Необходимо: " + totalCost + 
+                                  ", доступно: " + account.getBalance());
                 }
-                // Замораживаем средства
                 account.setBalance(account.getBalance() - totalCost);
                 accountRepository.save(account);
             }
 
-            // 9. Создаем заявку
+            // 9. Создаем заявку со статусом PENDING
             Order order = new Order(
-                    account,
-                    request.getSeccode(),
-                    request.getType().toUpperCase(),
-                    request.getPrice(),
-                    request.getQuantity());
+                account,
+                request.getSeccode(),
+                request.getType().toUpperCase(),
+                request.getPrice(),
+                request.getQuantity()
+            );
 
-            Order saved = orderRepository.save(order);
+            Order savedOrder = orderRepository.save(order);
 
-            // 10. Формируем ответ
+            // 10. СОПОСТАВЛЕНИЕ ЗАЯВОК
+            List<Trade> createdTrades = matchOrder(savedOrder);
+
+            // 11. Формируем ответ
             OrderResponse response = new OrderResponse(
-                    saved.getId(),
-                    saved.getSeccode(),
-                    saved.getAccount().getId(),
-                    saved.getType(),
-                    saved.getPrice(),
-                    saved.getQuantity(),
-                    saved.getStatus(),
-                    saved.getCreatedAt());
+                savedOrder.getId(),
+                savedOrder.getSeccode(),
+                savedOrder.getAccount().getId(),
+                savedOrder.getType(),
+                savedOrder.getPrice(),
+                savedOrder.getQuantity(),
+                savedOrder.getStatus(),
+                savedOrder.getCreatedAt()
+            );
+
+            // Добавляем информацию о созданных сделках
+            if (!createdTrades.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.CREATED)
+                        .body("Заявка создана. Создано сделок: " + createdTrades.size() + 
+                              ". Заявка: " + response);
+            }
 
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
 
@@ -127,25 +139,107 @@ public class OrderController {
         }
     }
 
-    // Получение заявки по ID
+    /**
+     * Сопоставление заявки с встречными заявками
+     */
+    private List<Trade> matchOrder(Order newOrder) {
+        List<Trade> createdTrades = new ArrayList<>();
+        
+        // Определяем встречный тип
+        String counterType = "BUY".equals(newOrder.getType()) ? "SELL" : "BUY";
+        
+        // Ищем все PENDING заявки встречного типа по тому же инструменту
+        List<Order> counterOrders = orderRepository.findBySeccodeAndTypeAndStatus(
+            newOrder.getSeccode(),
+            counterType,
+            "PENDING"
+        );
+        
+        for (Order counterOrder : counterOrders) {
+            // Не сопоставляем с самим собой
+            if (counterOrder.getId().equals(newOrder.getId())) {
+                continue;
+            }
+            
+            // Проверяем равенство цен
+            if (!newOrder.getPrice().equals(counterOrder.getPrice())) {
+                continue;
+            }
+            
+            // Определяем количество для сделки
+            int tradeQuantity = Math.min(
+                newOrder.getQuantity(),
+                counterOrder.getQuantity()
+            );
+            
+            // Определяем, какая заявка BUY, какая SELL
+            Order buyOrder = "BUY".equals(newOrder.getType()) ? newOrder : counterOrder;
+            Order sellOrder = "SELL".equals(newOrder.getType()) ? newOrder : counterOrder;
+            
+            // Получаем инструмент
+            Instrument instrument = instrumentRepository.findBySeccode(newOrder.getSeccode())
+                    .orElse(null);
+            if (instrument == null) continue;
+            
+            // Создаем сделку
+            Trade trade = new Trade(
+                instrument,
+                buyOrder,
+                sellOrder,
+                newOrder.getPrice(),
+                tradeQuantity
+            );
+            
+            tradeRepository.save(trade);
+            createdTrades.add(trade);
+            
+            // Обновляем заявки
+            newOrder.setQuantity(newOrder.getQuantity() - tradeQuantity);
+            counterOrder.setQuantity(counterOrder.getQuantity() - tradeQuantity);
+            
+            if (newOrder.getQuantity() == 0) {
+                newOrder.setStatus("EXECUTED");
+            } else {
+                newOrder.setStatus("PENDING");
+            }
+            
+            if (counterOrder.getQuantity() == 0) {
+                counterOrder.setStatus("EXECUTED");
+            } else {
+                counterOrder.setStatus("PENDING");
+            }
+            
+            orderRepository.save(newOrder);
+            orderRepository.save(counterOrder);
+            
+            // Если новая заявка полностью исполнена, выходим
+            if (newOrder.getQuantity() == 0) {
+                break;
+            }
+        }
+        
+        return createdTrades;
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<?> getOrder(@PathVariable Long id) {
         Order order = orderRepository.findById(id).orElse(null);
-
+        
         if (order == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body("Заявка с ID " + id + " не найдена");
         }
 
         OrderResponse response = new OrderResponse(
-                order.getId(),
-                order.getSeccode(),
-                order.getAccount().getId(),
-                order.getType(),
-                order.getPrice(),
-                order.getQuantity(),
-                order.getStatus(),
-                order.getCreatedAt());
+            order.getId(),
+            order.getSeccode(),
+            order.getAccount().getId(),
+            order.getType(),
+            order.getPrice(),
+            order.getQuantity(),
+            order.getStatus(),
+            order.getCreatedAt()
+        );
 
         return ResponseEntity.ok(response);
     }
