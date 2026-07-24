@@ -1,9 +1,11 @@
+app\dto\QuoteResponse.class
 app\entity\Account.class
 app\repository\OrderRepository.class
 app\dto\TradeResponse.class
 app\entity\Instrument.class
 app\controller\TradeController.class
 app\dto\InstrumentResponse.class
+app\controller\OrderController.class
 app\repository\AccountRepository.class
 app\DemoApplication.class
 app\dto\OrderResponse.class
