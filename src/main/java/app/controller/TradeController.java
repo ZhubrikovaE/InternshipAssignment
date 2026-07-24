@@ -10,6 +10,9 @@ import org.springframework.web.bind.annotation.*;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Контроллер сделок
+ */
 @RestController
 @RequestMapping("/api/trades")
 public class TradeController {

@@ -9,6 +9,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * Контроллер счетов
+ */
 @RestController
 @RequestMapping("/api/accounts")
 public class AccountController {

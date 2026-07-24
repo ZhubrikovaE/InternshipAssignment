@@ -9,6 +9,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * Контроллер инструментов
+ */
 @RestController
 @RequestMapping("/api/instruments")
 public class InstrumentController {
