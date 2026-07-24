@@ -11,7 +11,9 @@ D:\InternshipAssignment\src\main\java\app\repository\InstrumentRepository.java
 D:\InternshipAssignment\src\main\java\app\dto\OrderRequest.java
 D:\InternshipAssignment\src\main\java\app\controller\AccountController.java
 D:\InternshipAssignment\src\main\java\app\entity\Instrument.java
+D:\InternshipAssignment\src\main\java\app\controller\QuoteController.java
 D:\InternshipAssignment\src\main\java\app\dto\InstrumentRequest.java
+D:\InternshipAssignment\src\main\java\app\dto\QuoteResponse.java
 D:\InternshipAssignment\src\main\java\app\controller\TradeController.java
 D:\InternshipAssignment\src\main\java\app\dto\AccountResponse.java
 D:\InternshipAssignment\src\main\java\app\entity\Order.java
